@@ -4,16 +4,21 @@ using TwitchPlays.Twitch;
 
 namespace TwitchPlays
 {
-    [StructLayout(LayoutKind.Explicit)]
+    [StructLayout(LayoutKind.Sequential)]
     struct INPUT
     {
+        public uint type;
+        public MOUSEKEYBDHARDWAREINPUT data;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    struct MOUSEKEYBDHARDWAREINPUT
+    {
         [FieldOffset(0)]
-        public int type;
-        [FieldOffset(4)]
         public MOUSEINPUT mi;
-        [FieldOffset(4)]
+        [FieldOffset(0)]
         public KEYBDINPUT ki;
-        [FieldOffset(4)]
+        [FieldOffset(0)]
         public HARDWAREINPUT hi;
     }
 
@@ -65,7 +70,7 @@ namespace TwitchPlays
         [LibraryImport("user32.dll", EntryPoint = "MapVirtualKeyA", SetLastError = true)]
         internal static partial uint MapVirtualKey(uint uCode, uint uMapType);
 
-        [LibraryImport("user32.dll", EntryPoint = "SendInput", SetLastError = true)]
+        [LibraryImport("user32.dll", EntryPoint = "SendInput", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
         internal static partial uint SendInput(uint nInputs, [In] INPUT[] pInputs, int cbSize);
 
         public static short CharToScan(char key)
@@ -106,34 +111,35 @@ namespace TwitchPlays
             {
                 type = INPUT_KEYBOARD
             };
-            inputData.ki.dwFlags = KEYEVENTF_SCANCODE;
+            inputData.data.ki.dwFlags = KEYEVENTF_SCANCODE;
+            inputData.data.ki.wVk = 0;
+            inputData.data.ki.time = 0;
             return inputData;
         }
 
-        private static void ConvertToKeyUp(INPUT inputData)
+        private static void ConvertToKeyUp(ref INPUT inputData)
         {
-            inputData.ki.dwFlags = KEYEVENTF_KEYUP | KEYEVENTF_SCANCODE;
-            inputData.ki.time = 0;
-            inputData.ki.dwExtraInfo = IntPtr.Zero;
+            inputData.data.ki.dwFlags = KEYEVENTF_KEYUP | KEYEVENTF_SCANCODE;
+            inputData.data.ki.time = 0;
         }
 
-        public void Send()
+        public void Send(nint extra)
         {
             if (IsCombo)
             {
                 var inputData = new INPUT[1] { SetupInput() };
                 foreach (var key in Keys)
                 {
-                    inputData[0].ki.wScan = key;
+                    inputData[0].data.ki.wScan = key;
                     SendInput((uint)inputData.Length, inputData, Marshal.SizeOf(typeof(INPUT)));
                 }
 
                 Thread.Sleep(Duration);
 
-                ConvertToKeyUp(inputData[0]);
+                ConvertToKeyUp(ref inputData[0]);
                 foreach (var key in Keys)
                 {
-                    inputData[0].ki.wScan = key;
+                    inputData[0].data.ki.wScan = key;
                     SendInput((uint)inputData.Length, inputData, Marshal.SizeOf(typeof(INPUT)));
                 }
             }
@@ -142,10 +148,11 @@ namespace TwitchPlays
                 foreach (var key in Keys)
                 {
                     var inputData = new INPUT[1] { SetupInput() };
-                    inputData[0].ki.wScan = key;
+                    inputData[0].data.ki.dwExtraInfo = extra;
+                    inputData[0].data.ki.wScan = key;
                     SendInput((uint)inputData.Length, inputData, Marshal.SizeOf(typeof(INPUT)));
                     Thread.Sleep(Duration);
-                    ConvertToKeyUp(inputData[0]);
+                    ConvertToKeyUp(ref inputData[0]);
                     SendInput((uint)inputData.Length, inputData, Marshal.SizeOf(typeof(INPUT)));
                 }
             }
@@ -156,6 +163,8 @@ namespace TwitchPlays
     {
         [LibraryImport("User32.dll")]
         internal static partial int SetForegroundWindow(IntPtr point);
+        [LibraryImport("User32.dll")]
+        internal static partial nint GetMessageExtraInfo();
 
         private readonly Dictionary<string, KeyPress> _commands = new()
         {
@@ -202,9 +211,9 @@ namespace TwitchPlays
             CancellationTokenSource = cancellationTokenSource;
         }
 
-        public async Task Play()
+        public async Task Play(string target)
         {
-            Process[] p = Process.GetProcessesByName("DARKSOULS");
+            Process[] p = Process.GetProcessesByName(target);
             IntPtr h = (IntPtr)0;
             if (p.Length > 0)
             {
@@ -221,7 +230,10 @@ namespace TwitchPlays
                     var command = message.Message.Split(' ')[0].ToLower();
                     if (_commands.TryGetValue(command, out var keyPress))
                     {
-                        keyPress.Send();
+                        _ = SetForegroundWindow(h);
+                        Thread.Sleep(10);
+                        var extra = GetMessageExtraInfo();
+                        keyPress.Send(extra);
                     }
                 }
                 await Task.Delay(10);

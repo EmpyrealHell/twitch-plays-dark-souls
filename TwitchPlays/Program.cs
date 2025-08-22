@@ -88,7 +88,7 @@ namespace TwitchPlays
             return null;
         }
 
-        private static async Task RunBot(ClientData clientData, TokenData tokenData)
+        private static async Task RunBot(ClientData clientData, TokenData tokenData, string target)
         {
             var client = new TwitchClient(clientData, tokenData);
             var irc = new TwitchIrcClient(tokenData, client);
@@ -105,7 +105,7 @@ namespace TwitchPlays
             if (connected)
             {
                 var controller = new ChatController(irc, new CancellationTokenSource());
-                await controller.Play();
+                await controller.Play(target);
             }
             Logger.Error("Unable to connect to Twitch, please verify your connection and try again.");
         }
@@ -113,22 +113,29 @@ namespace TwitchPlays
         static async Task Main(string[] args)
         {
             ConfigureLogger();
-            if (args.Any(x => x.Equals("-help") || x.Equals("/help") || x.Equals("?") || x.Equals("/?")))
+            if (args.Any(x => x.Equals("-help") || x.Equals("?") || x.Equals("/?")))
             {
                 Logger.Info("Twitch Plays DarkSouls - listens for chat messages in the authenticated user's channel and converts them into inputs for Dark Souls");
-                Logger.Info("Arguments: -help - displays this message");
-                Logger.Info("Arguments: -client - resets client data");
-                Logger.Info("Arguments: -auth - resets credentials and forces authentication");
+                Logger.Info("Arguments: -client,-c - resets client data");
+                Logger.Info("Arguments: -auth,-a - resets credentials and forces authentication");
+                Logger.Info("Arguments: -target,-t - the name of the process to send commands to (default is DARKSOULS)");
+                return;
             }
-            if (args.Any(x => x.Equals("-client") || x.Equals("/client")))
+            if (args.Any(x => x.Equals("-client") || x.Equals("-c")))
             {
                 Logger.Info("Clearing client data");
                 FileUtils.WriteClientData(new ClientData());
             }
-            if (args.Any(x => x.Equals("-auth") || x.Equals("/auth")))
+            if (args.Any(x => x.Equals("-auth") || x.Equals("-a")))
             {
                 Logger.Info("Clearing auth credentials");
                 FileUtils.WriteTokenData(new TokenData());
+            }
+            var target = "DARKSOULS";
+            var newTarget = args.FirstOrDefault("-target") ?? args.FirstOrDefault("-t");
+            if (newTarget != null && newTarget.Contains('='))
+            {
+                target = newTarget.Split('=')[1];
             }
             Logger.Info("Loading client data...");
             var clientData = LoadClientData();
@@ -136,7 +143,7 @@ namespace TwitchPlays
             var tokenData = await Authenticate(clientData);
             if (tokenData != null)
             {
-                await RunBot(clientData, tokenData);
+                await RunBot(clientData, tokenData, target);
             }
             Logger.Info("Application terminated, press any key to close.");
             Console.ReadKey();
